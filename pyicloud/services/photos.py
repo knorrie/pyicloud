@@ -1,6 +1,7 @@
 import sys
 import json
 import urllib
+import logging
 
 from datetime import datetime
 from base64 import b64decode
@@ -10,6 +11,8 @@ from pyicloud.exceptions import (
     PyiCloudBinaryFeedParseError,
     PyiCloudPhotoLibraryNotActivatedErrror
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PhotosService(object):
@@ -64,6 +67,7 @@ class PhotosService(object):
         return self.albums['All Photos']
 
     def _fetch_asset_data_for(self, client_ids):
+        logger.debug("Fetching data for client IDs %s", client_ids)
         client_ids = [cid for cid in client_ids
                       if cid not in self._photo_assets]
 
@@ -129,6 +133,8 @@ class PhotoAlbum(object):
         return self._photo_assets
 
     def _parse_binary_feed(self, feed):
+        logger.debug("Parsing binary feed %s", feed)
+
         binaryfeed = bytearray(b64decode(feed))
         bitstream = ConstBitStream(binaryfeed)
 
@@ -167,6 +173,9 @@ class PhotoAlbum(object):
             range_start = bitstream.read("uint:24")
             range_length = bitstream.read("uint:24")
             range_end = range_start + range_length
+
+            logger.debug("Decoding indexes [%s-%s) (length %s)",
+                         range_start, range_end, range_length)
 
             previous_asset_id = 0
             for index in range(range_start, range_end):
