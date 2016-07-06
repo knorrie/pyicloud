@@ -146,6 +146,9 @@ class PhotoAlbum(object):
                     "Missing childAssetsBinaryFeed in photo album")
 
             self._photo_assets = _parse_binary_feed(child_assets).values()
+            if None in self._photo_assets:
+                raise PyiCloudBinaryFeedParseError(
+                    "childAssetsBinaryFeed has entries with empty payload")
 
             for asset in self._photo_assets:
                 asset.album = self
@@ -270,6 +273,7 @@ def _parse_binary_feed(feed):
         raise PyiCloudBinaryFeedParseError(
             "Missmatch betweeen binaryfeed and bistream payload encoding")
 
+    EMPTY_PAYLOAD = 0
     ASSET_PAYLOAD = 255
     ASSET_WITH_ORIENTATION_PAYLOAD = 254
     ASPECT_RATIOS = [
@@ -290,7 +294,11 @@ def _parse_binary_feed(feed):
         3
     ]
 
-    valid_payloads = [ASSET_PAYLOAD, ASSET_WITH_ORIENTATION_PAYLOAD]
+    valid_payloads = [
+        EMPTY_PAYLOAD,
+        ASSET_PAYLOAD,
+        ASSET_WITH_ORIENTATION_PAYLOAD
+    ]
     if payload_encoding not in valid_payloads:
         raise PyiCloudBinaryFeedParseError(
             "Unknown payload encoding '%s'" % payload_encoding)
@@ -306,6 +314,10 @@ def _parse_binary_feed(feed):
 
         previous_asset_id = 0
         for index in range(range_start, range_end):
+            if payload_encoding == EMPTY_PAYLOAD:
+                assets[index] = None
+                continue
+
             aspect_ratio = ASPECT_RATIOS[bitstream.read("uint:4")]
 
             id_size = bitstream.read("uint:2")
