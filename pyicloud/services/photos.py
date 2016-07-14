@@ -43,22 +43,17 @@ class PhotosService(object):
                     "iCloud Photo Library has not been activated yet "
                     "for this user")
 
+        self._photo_albums = {}
         self._photo_assets = {}
 
     @property
     def albums(self):
-        albums = {}
-        for folder in self._fetch_folders():
-            if not folder['type'] == 'album':
-                # FIXME: Handle subfolders
-                continue
+        if not self._photo_albums:
+            self._update_folders()
 
-            album = PhotoAlbum(folder, self)
-            albums[album.title] = album
+        return {v.title: v for k, v in self._photo_albums.iteritems()}
 
-        return albums
-
-    def _fetch_folders(self, server_ids=[]):
+    def _update_folders(self, server_ids=[]):
         folders = server_ids if server_ids else ""
         logger.debug("Fetching folders %s...", folders)
 
@@ -76,7 +71,108 @@ class PhotosService(object):
             data=data
         )
         response = request.json()
-        return response['folders']
+
+        for folder in response['folders']:
+            if not folder['type'] == 'album':
+                # FIXME: Handle subfolders
+                continue
+
+            server_id = folder['serverId']
+            if server_id in self._photo_albums:
+                self._photo_albums[server_id]._update(folder)
+            else:
+                album = PhotoAlbum(folder, self)
+                self._photo_albums[server_id] = album
+
+    def update(self):
+        logger.info("Looking for photo library changes...")
+
+        data = json.dumps({'syncToken': self.params.get('syncToken')})
+        request = self.session.post(
+            '%s/changeset' % self._service_endpoint,
+            params=self.params,
+            data=data
+        )
+
+        response = request.json()
+
+        def report_unhandled_change(change_type, operation):
+            message = "Unhanded %s change operation: %s"
+            logger.warning(message, change_type, operation)
+            logger.debug(change)
+
+        def past_tense(s):
+            if not s.endswith('e'):
+                s += 'e'
+            return s + 'd'
+
+        updated_folders = []
+        for change in response['changes']:
+
+            change_type = change.get('type')
+            operation = change.get('operation')
+
+            if change_type in ['years', 'collections', 'moments']:
+                # These albums are not available through the API
+                logger.info("Ignoring change in '%s'", change_type)
+
+            elif change_type.endswith('asset-derivatives'):
+                # We don't cache asset derivatives, so no need to reset them
+                logger.debug("Ignoring change in '%s'", change_type)
+
+            elif change_type == 'folder':
+                server_id = change.get('serverId')
+                logger.info("Album '%s' %s", server_id, past_tense(operation))
+                if operation == 'insert' or operation == 'update':
+                    updated_folders.append(server_id)
+                elif operation == 'remove':
+                    if server_id in self._photo_albums:
+                        del self._photo_albums[server_id]
+                    else:
+                        logger.warning("Album %s was unknown", server_id)
+                else:
+                    report_unhandled_change(change_type, operation)
+
+            elif change_type == 'assets':
+                if operation == 'update':
+                    assets = _parse_binary_feed(change.get('binaryFeed'))
+                    for asset in assets.values():
+                        logger.info("Invalidating asset %s", asset.client_id)
+                        if asset.client_id in self._photo_assets:
+                            del self._photo_assets[asset.client_id]
+                elif operation == 'remove' or operation == 'insert':
+                    message = "Ignoring generic asset %s operation"
+                    logger.debug(message, operation)
+                else:
+                    report_unhandled_change(change_type, operation)
+
+            elif change_type == 'folder-assets':
+                server_id = change.get('serverId')
+                assets = _parse_binary_feed(change.get('binaryFeed'))
+                for index, asset in assets.items():
+                    message = "Performing %s of asset %s in album %s"
+                    logger.info(message, operation, index, server_id)
+
+                    album = self._photo_albums[server_id]
+                    if operation == 'remove':
+                        del album.photos[index]
+                    elif operation == 'insert':
+                        album.photos.insert(index, asset)
+                        asset.album = album
+                    else:
+                        report_unhandled_change(change_type, operation)
+
+            else:
+                report_unhandled_change(change_type, operation)
+
+        previousSyncToken = self.params['syncToken']
+        self.params.update({'syncToken': response['syncToken']})
+
+        updated_folders = list(set(updated_folders))
+        if updated_folders:
+            self._update_folders(updated_folders)
+
+        return self.params['syncToken'] != previousSyncToken
 
     @property
     def all(self):
@@ -171,6 +267,11 @@ class PhotoAlbum(object):
         self.service._fetch_asset_data_for(client_ids)
         return self.service._photo_assets[asset.client_id]
 
+    def _update(self, data):
+        self.data = data
+        # FIXME: Ensure that old references to photo assets work
+        self._photo_assets = None
+
     def __unicode__(self):
         return self.title
 
@@ -197,9 +298,7 @@ class PhotoAsset(object):
 
     @property
     def data(self):
-        if not self._data:
-            self._data = self.album._fetch_asset_data_for(self)
-        return self._data
+        return self.album._fetch_asset_data_for(self)
 
     @property
     def filename(self):
