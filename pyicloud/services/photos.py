@@ -153,14 +153,15 @@ class PhotosService(object):
                     message = "Performing %s of asset %s in album %s"
                     logger.info(message, operation, index, server_id)
 
-                    album = self._photo_albums[server_id]
-                    if operation == 'remove':
-                        del album.photos[index]
-                    elif operation == 'insert':
-                        album.photos.insert(index, asset)
-                        asset.album = album
-                    else:
-                        report_unhandled_change(change_type, operation)
+                    if server_id in self._photo_albums:
+                        album = self._photo_albums[server_id]
+                        if operation == 'remove' and index in album.photos:
+                            del album.photos[index]
+                        elif operation == 'insert':
+                            album.photos.insert(index, asset)
+                            asset.album = album
+                        else:
+                            report_unhandled_change(change_type, operation)
 
             else:
                 report_unhandled_change(change_type, operation)
