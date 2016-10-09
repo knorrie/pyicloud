@@ -6,8 +6,8 @@ import json
 import logging
 import requests
 import sys
-import tempfile
 import os
+import pwd
 from re import match
 
 from pyicloud.exceptions import (
@@ -135,8 +135,8 @@ class PyiCloudService(object):
             )
         else:
             self._cookie_directory = os.path.join(
-                tempfile.gettempdir(),
-                'pyicloud',
+                pwd.getpwuid(os.getuid())[5],
+                '.pyicloud',
             )
 
         self.session = PyiCloudSession(self)
