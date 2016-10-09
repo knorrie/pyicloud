@@ -8,7 +8,6 @@ import requests
 import sys
 import os
 import pwd
-from re import match
 
 from pyicloud.exceptions import (
     PyiCloudFailedLoginException,
@@ -224,11 +223,7 @@ class PyiCloudService(object):
         logger.debug(self.params)
 
     def _get_cookiejar_path(self):
-        # Get path for cookiejar file
-        return os.path.join(
-            self._cookie_directory,
-            ''.join([c for c in self.user.get('apple_id') if match(r'\w', c)])
-        )
+        return os.path.join(self._cookie_directory, self.user.get('apple_id'))
 
     @property
     def requires_2fa(self):
