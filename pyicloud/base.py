@@ -13,7 +13,8 @@ from re import match
 from pyicloud.exceptions import (
     PyiCloudFailedLoginException,
     PyiCloudAPIResponseError,
-    PyiCloud2FARequiredError
+    PyiCloud2FARequiredError,
+    PyiCloudServiceNotActivatedErrror
 )
 from pyicloud.services import (
     FindMyiPhoneServiceManager,
@@ -90,11 +91,24 @@ class PyiCloudSession(requests.Session):
             reason = "Unknown reason"
 
         code = json.get('errorCode')
+        if not code and json.get('serverErrorCode'):
+            code = json.get('serverErrorCode')
 
         if reason:
             if self.service.requires_2fa and \
                     reason == 'Missing X-APPLE-WEBAUTH-TOKEN cookie':
                 raise PyiCloud2FARequiredError(response.url)
+            if code == 'ZONE_NOT_FOUND' or code == 'AUTHENTICATION_FAILED':
+                reason = 'Please log into https://icloud.com/ to manually ' \
+                    'finish setting up your iCloud service'
+                api_error = PyiCloudServiceNotActivatedErrror(reason, code)
+                logger.error(api_error)
+
+                raise(api_error)
+            if code == 'ACCESS_DENIED':
+                reason = reason + '.  Please wait a few minutes then try ' \
+                    'again.  The remote servers might be trying to ' \
+                    'throttle requests.'
 
             api_error = PyiCloudAPIResponseError(reason, code)
             logger.error(api_error)
@@ -113,6 +127,7 @@ class PyiCloudService(object):
         pyicloud = PyiCloudService('username@apple.com', 'password')
         pyicloud.iphone.location()
     """
+
     def __init__(
         self, apple_id, password=None, cookie_directory=None, verify=True
     ):
@@ -162,7 +177,10 @@ class PyiCloudService(object):
                 logger.warning("Failed to read cookiejar %s", cookiejar_path)
 
         self.params = {
-            'clientBuildNumber': '14E45',
+            'clientBuildNumber': '17DHotfix5',
+            'clientMasteringNumber': '17DHotfix5',
+            'ckjsBuildVersion': '17DProjectDev77',
+            'ckjsVersion': '2.0.5',
             'clientId': self.client_id,
         }
 
@@ -299,7 +317,7 @@ class PyiCloudService(object):
     @property
     def photos(self):
         if not hasattr(self, '_photos'):
-            service_root = self.webservices['photos']['url']
+            service_root = self.webservices['ckdatabasews']['url']
             self._photos = PhotosService(
                 service_root,
                 self.session,
